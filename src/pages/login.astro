@@ -1,0 +1,80 @@
+---
+import PublicLayout from '@/layouts/PublicLayout.astro';
+
+if (Astro.locals.user) {
+  return Astro.redirect('/app/dashboard');
+}
+---
+
+<PublicLayout title="Iniciar sesión | DigitalDent" showNavLogin={false}>
+  <section class="flex min-h-[70vh] items-center justify-center bg-slate-950 py-16">
+    <div class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/70 p-10 shadow-2xl shadow-primary/10">
+      <h1 class="text-2xl font-semibold text-white">Bienvenido de nuevo</h1>
+      <p class="mt-2 text-sm text-slate-300">Accede con tu email y contraseña o utiliza Google OAuth (próximamente).</p>
+      <form id="login-form" class="mt-8 space-y-5">
+        <label class="flex flex-col gap-2 text-sm font-medium text-white">
+          <span>Email</span>
+          <input type="email" name="email" required class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+        </label>
+        <label class="flex flex-col gap-2 text-sm font-medium text-white">
+          <span>Contraseña</span>
+          <input type="password" name="password" required class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+        </label>
+        <button type="submit" class="w-full rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary/90">
+          Ingresar
+        </button>
+        <p id="login-feedback" class="text-sm text-slate-300"></p>
+      </form>
+      <p class="mt-8 text-center text-xs text-slate-500">
+        ¿No tienes cuenta? <a href="/register" class="text-accent hover:underline">Solicita acceso</a>
+      </p>
+    </div>
+  </section>
+  <script slot="scripts" type="module" is:inline>
+      const form = document.getElementById('login-form');
+      const feedback = document.getElementById('login-feedback');
+
+      const parseResponse = async (response) => {
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('application/json')) {
+          try {
+            return await response.json();
+          } catch {
+            return {};
+          }
+        }
+
+        const text = await response.text();
+        return text ? { error: text } : {};
+      };
+
+      if (form instanceof HTMLFormElement && feedback) {
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          feedback.textContent = 'Validando credenciales...';
+          feedback.classList.remove('text-red-400');
+
+          const formData = new FormData(form);
+          const payload = Object.fromEntries(formData.entries());
+
+          try {
+            const response = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const result = await parseResponse(response);
+            if (!response.ok || !result?.success) {
+              const message = result?.error || `Credenciales inválidas (${response.status})`;
+              throw new Error(message);
+            }
+            feedback.textContent = '¡Bienvenido! Redirigiendo...';
+            window.location.href = '/app/dashboard';
+          } catch (error) {
+            feedback.textContent = error instanceof Error ? error.message : 'No pudimos iniciar sesión';
+            feedback.classList.add('text-red-400');
+          }
+        });
+      }
+  </script>
+</PublicLayout>

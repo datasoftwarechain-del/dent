@@ -1,0 +1,36 @@
+---
+import '../styles/global.css';
+import AppSidebar from '@/components/AppSidebar.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { isAdmin } from '@/server/auth/permissions';
+
+const {
+  title = 'Panel DigitalDent',
+  description = '',
+  user
+} = Astro.props;
+
+if (!Astro.locals.user) {
+  return Astro.redirect('/login');
+}
+
+const currentUser = user ?? Astro.locals.user;
+const isBillingAllowed = isAdmin(currentUser);
+---
+
+<html lang="es" class="bg-slate-950">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body class="flex min-h-screen bg-slate-950 text-slate-100">
+    <AppSidebar user={currentUser} isBillingAllowed={isBillingAllowed} />
+    <div class="flex flex-1 flex-col">
+      <AppHeader title={title} description={description} />
+      <main class="flex-1 overflow-y-auto bg-slate-900/60 p-6">
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

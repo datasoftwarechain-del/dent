@@ -1,0 +1,7 @@
+---
+if (!Astro.locals.user) {
+  return Astro.redirect('/login');
+}
+
+return Astro.redirect('/app/dashboard');
+---

@@ -1,0 +1,434 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import { supabaseAdmin } from '@/server/db/client';
+import { listWorkOrders } from '@/server/services/work-order-service';
+import { isAdmin } from '@/server/auth/permissions';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const isAdminUser = isAdmin(user);
+
+const search = Astro.url.searchParams.get('search') ?? undefined;
+const clientIdParam = Astro.url.searchParams.get('clientId') ?? undefined;
+const clientId = clientIdParam && clientIdParam.length > 0 ? clientIdParam : undefined;
+type SortKey =
+  | 'createdAt_asc'
+  | 'createdAt_desc'
+  | 'client_asc'
+  | 'client_desc'
+  | 'updatedAt_desc'
+  | 'code_asc'
+  | 'code_desc'
+  | 'number_asc'
+  | 'number_desc';
+const sortParam = Astro.url.searchParams.get('sort') ?? undefined;
+const allowedSorts: SortKey[] = [
+  'createdAt_asc',
+  'createdAt_desc',
+  'client_asc',
+  'client_desc',
+  'updatedAt_desc',
+  'code_asc',
+  'code_desc',
+  'number_asc',
+  'number_desc'
+];
+const defaultSort: SortKey = 'createdAt_desc';
+const sort: SortKey = sortParam && allowedSorts.includes(sortParam as SortKey)
+  ? (sortParam as SortKey)
+  : defaultSort;
+const limitParam = Astro.url.searchParams.get('limit');
+const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : NaN;
+const pageSize = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 20;
+const pageParam = Number.parseInt(Astro.url.searchParams.get('page') ?? '1', 10);
+const page = Number.isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+const skip = (page - 1) * pageSize;
+
+let result;
+try {
+  result = await listWorkOrders(
+    {
+      search,
+      clientId,
+      take: pageSize,
+      skip,
+      sort
+    },
+    { id: user.id, role: user.role, email: user.email ?? undefined }
+  );
+} catch (error) {
+  console.error('[work-orders][page] failed to list orders', error);
+  result = { items: [], total: 0, take: pageSize, skip };
+}
+
+const { data: clients = [] } = await supabaseAdmin
+  .from('clients')
+  .select('id,name')
+  .order('name', { ascending: true });
+
+const totalPages = Math.max(1, Math.ceil(result.total / (result.take ?? pageSize)));
+
+const buildPageHref = (pageNumber: number) => {
+  const url = new URL(Astro.url.toString());
+  url.searchParams.set('page', String(pageNumber));
+  const query = url.searchParams.toString();
+  return query ? `${url.pathname}?${query}` : url.pathname;
+};
+
+const buildSortHref = (value: SortKey) => {
+  const url = new URL(Astro.url.toString());
+  url.searchParams.set('sort', value);
+  url.searchParams.set('page', '1');
+  const query = url.searchParams.toString();
+  return query ? `${url.pathname}?${query}` : url.pathname;
+};
+
+const resetFiltersHref = () => {
+  const url = new URL(Astro.url.toString());
+  url.searchParams.delete('clientId');
+  url.searchParams.delete('search');
+  url.searchParams.delete('page');
+  url.searchParams.delete('sort');
+  url.searchParams.delete('limit');
+  const query = url.searchParams.toString();
+  return query ? `${url.pathname}?${query}` : url.pathname;
+};
+
+const formatWorkType = (value: string | null | undefined) => {
+  if (!value) return 'Sin definir';
+  return value
+    .split('_')
+    .map((segment) =>
+      segment.length ? segment.charAt(0) + segment.slice(1).toLowerCase() : segment
+    )
+    .join(' ');
+};
+
+const statusLabels: Record<string, string> = {
+  CREATED: 'Creada',
+  IN_PROGRESS: 'En progreso',
+  DONE: 'Lista',
+  DELIVERED: 'Entregada'
+};
+
+const sortOptions: Array<{ value: SortKey; label: string }> = [
+  { value: 'createdAt_desc', label: 'Fecha ↓' },
+  { value: 'createdAt_asc', label: 'Fecha ↑' },
+  { value: 'client_asc', label: 'Cliente A→Z' },
+  { value: 'client_desc', label: 'Cliente Z→A' },
+  { value: 'code_asc', label: 'Código A→Z' },
+  { value: 'code_desc', label: 'Código Z→A' },
+  { value: 'number_asc', label: 'Número ↑' },
+  { value: 'number_desc', label: 'Número ↓' }
+];
+
+const filtersActive = Boolean(search?.length) || Boolean(clientId);
+const showReset = filtersActive || sort !== defaultSort;
+---
+
+<AppLayout title="Órdenes" description="Gestiona y filtra todos los casos activos" user={user}>
+  <div class="rounded-3xl border border-white/10 bg-slate-950/70 shadow-lg shadow-primary/5">
+    <div class="flex flex-col gap-4 border-b border-white/5 p-6">
+      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-white">{result.total} órdenes</h2>
+          <p class="text-sm text-slate-400">
+            Filtra por cliente o búsqueda y ordena por fecha, cliente, código o número.
+          </p>
+        </div>
+        <a
+          href="/app/work-orders/new"
+          class="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+        >
+          + Crear orden
+        </a>
+      </div>
+      <form method="get" class="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+        <input type="hidden" name="page" value="1" />
+        <input type="hidden" name="sort" value={sort} />
+        <input type="hidden" name="limit" value={String(pageSize)} />
+        <input
+          name="search"
+          value={search ?? ''}
+          placeholder="Buscar orden o paciente"
+          class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-white focus:border-accent focus:outline-none"
+        />
+        <select
+          name="clientId"
+          class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+        >
+          <option value="">Todos los clientes</option>
+          {clients.map((client) => (
+            <option value={client.id} selected={clientId === client.id}>
+              {client.name}
+            </option>
+          ))}
+        </select>
+        <button class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:border-accent hover:text-accent">
+          Aplicar filtros
+        </button>
+      </form>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Ordenar por:
+        </span>
+        {sortOptions.map((option) => (
+          <a
+            href={buildSortHref(option.value)}
+            class={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+              sort === option.value
+                ? 'bg-accent/20 text-accent'
+                : 'border border-white/10 text-slate-300 hover:border-accent hover:text-accent'
+            }`}
+          >
+            {option.label}
+          </a>
+        ))}
+        {showReset && (
+          <a
+            href={resetFiltersHref()}
+            class="ml-auto rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-300 hover:border-accent hover:text-accent"
+          >
+            Limpiar filtros
+          </a>
+        )}
+      </div>
+      {isAdminUser && (
+        <p
+          id="orders-billing-feedback"
+          class="hidden rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200"
+        ></p>
+      )}
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-white/5 text-sm">
+        <thead class="bg-slate-950/60 text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr>
+            <th class="px-6 py-3">Código</th>
+            <th class="px-6 py-3">Número</th>
+            <th class="px-6 py-3">Cliente</th>
+            <th class="px-6 py-3">Paciente</th>
+            <th class="px-6 py-3">Tipo</th>
+            <th class="px-6 py-3">Entrega</th>
+            <th class="px-6 py-3">Estado</th>
+            <th class="px-6 py-3">Acciones</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5 text-slate-200">
+          {result.items.map((order) => (
+            <tr class="hover:bg-white/5" data-order-row data-order-id={order.id}>
+              <td class="px-6 py-3 font-semibold text-white">{order.displayCode ?? order.code}</td>
+              <td class="px-6 py-3">{typeof order.sequentialNumber === 'number' ? order.sequentialNumber : '—'}</td>
+              <td class="px-6 py-3">{order.client?.name ?? order.client?.email ?? 'Sin asignar'}</td>
+              <td class="px-6 py-3">{order.patient?.name ?? 'Sin paciente'}</td>
+              <td class="px-6 py-3">{formatWorkType(order.workType)}</td>
+              <td class="px-6 py-3">
+                {order.dueDate ? new Date(order.dueDate).toLocaleDateString('es-AR') : 'Sin fecha'}
+              </td>
+              <td class="px-6 py-3">
+                <span
+                  class="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white"
+                  data-status
+                  data-status-code={order.status}
+                  data-status-label={statusLabels[order.status] ?? order.status}
+                >
+                  {statusLabels[order.status] ?? order.status}
+                </span>
+              </td>
+              <td class="px-6 py-3">
+                <div class="flex items-center gap-3">
+                  <a href={`/app/work-orders/${order.id}`} class="text-accent hover:underline">Ver</a>
+                  <a href={`/app/work-orders/${order.id}/edit`} class="text-slate-300 hover:text-white hover:underline">Editar</a>
+                  {isAdminUser && order.status === 'DONE' && (
+                    <button
+                      type="button"
+                      class="rounded-full border border-white/10 bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-200 hover:border-emerald-400 hover:bg-emerald-500/20"
+                      data-deliver-order
+                      data-order-id={order.id}
+                    >
+                      Marcar Entregada
+                    </button>
+                  )}
+                  {isAdminUser && order.client?.id && ['DONE', 'DELIVERED'].includes(order.status) && (
+                    <button
+                      type="button"
+                      class="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-200 hover:border-emerald-400 hover:text-emerald-300"
+                      data-generate-invoice
+                      data-order-id={order.id}
+                      data-client-id={order.client.id}
+                    >
+                      Generar factura
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {totalPages > 1 && (
+      <div class="flex flex-col gap-3 border-t border-white/5 px-6 py-4 text-sm text-slate-300 md:flex-row md:items-center md:justify-between">
+        <span>Página {page} de {totalPages}</span>
+        <div class="flex items-center gap-2">
+          {page > 1 ? (
+            <a href={buildPageHref(page - 1)} class="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-200 hover:border-accent hover:text-accent">
+              Anterior
+            </a>
+          ) : (
+            <span class="rounded-lg border border-white/5 px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+              Anterior
+            </span>
+          )}
+          {page < totalPages ? (
+            <a href={buildPageHref(page + 1)} class="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-200 hover:border-accent hover:text-accent">
+              Siguiente
+            </a>
+          ) : (
+            <span class="rounded-lg border border-white/5 px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+              Siguiente
+            </span>
+          )}
+        </div>
+      </div>
+    )}
+  </div>
+</AppLayout>
+
+{isAdminUser && (
+  <script is:inline>
+    (() => {
+      const statusLabels = JSON.parse('{"CREATED":"Creada","IN_PROGRESS":"En progreso","DONE":"Lista","DELIVERED":"Entregada"}');
+      const toStatusLabel = (status) => {
+        if (typeof status !== 'string') return '';
+        return statusLabels[status] ?? status;
+      };
+
+      const feedback = document.getElementById('orders-billing-feedback');
+      const showMessage = (message, isError = false) => {
+        if (!feedback) return;
+        feedback.textContent = message;
+        feedback.classList.remove('hidden');
+        feedback.classList.toggle('border-emerald-500/20', !isError);
+        feedback.classList.toggle('bg-emerald-500/10', !isError);
+        feedback.classList.toggle('text-emerald-200', !isError);
+        feedback.classList.toggle('border-rose-500/20', isError);
+        feedback.classList.toggle('bg-rose-500/10', isError);
+        feedback.classList.toggle('text-rose-200', isError);
+      };
+
+      const clearMessage = () => {
+        if (!feedback) return;
+        feedback.classList.add('hidden');
+      };
+
+      const updateStatusBadge = (orderId, status) => {
+        if (!orderId || !status) return;
+        const row = document.querySelector(`[data-order-row][data-order-id="${orderId}"]`);
+        const badge = row?.querySelector('[data-status]');
+        if (!(badge instanceof HTMLElement)) return;
+        const label = toStatusLabel(status);
+        badge.dataset.statusCode = status;
+        badge.dataset.statusLabel = label;
+        badge.textContent = label;
+      };
+
+      const removeDeliverButton = (orderId) => {
+        const button = document.querySelector(
+          `[data-deliver-order][data-order-id="${orderId}"]`
+        );
+        if (button && button.parentElement) {
+          button.parentElement.removeChild(button);
+        }
+      };
+
+      document.querySelectorAll('[data-deliver-order]').forEach((element) => {
+        if (!(element instanceof HTMLButtonElement)) return;
+        element.addEventListener('click', async () => {
+          const orderId = element.dataset.orderId;
+          if (!orderId) return;
+
+          element.disabled = true;
+          const originalText = element.textContent;
+          element.textContent = 'Entregando…';
+          clearMessage();
+
+          try {
+            const response = await fetch(`/api/work-orders/${orderId}/deliver`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' }
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo marcar la orden como entregada');
+            }
+
+            const nextStatus = data?.order?.status ?? 'DELIVERED';
+            updateStatusBadge(orderId, nextStatus);
+            removeDeliverButton(orderId);
+
+            const notifications = data?.notifications ?? {};
+            let info = 'Orden marcada como entregada.';
+            if (notifications.whatsapp?.sent) {
+              info += ' Se notificó por WhatsApp.';
+            } else if (notifications.email?.sent) {
+              info += ' Se envió la factura por email.';
+            } else {
+              info += ' No se pudo enviar la notificación automática.';
+            }
+            const hasSuccess = Boolean(notifications.whatsapp?.sent || notifications.email?.sent);
+            showMessage(info, !hasSuccess);
+          } catch (error) {
+            console.error('Error al marcar orden como entregada', error);
+            showMessage(
+              error instanceof Error ? error.message : 'Error al marcar la orden como entregada',
+              true
+            );
+          } finally {
+            element.disabled = false;
+            element.textContent = originalText ?? 'Marcar Entregada';
+          }
+        });
+      });
+
+      document.querySelectorAll('[data-generate-invoice]').forEach((element) => {
+        if (!(element instanceof HTMLButtonElement)) return;
+        element.addEventListener('click', async () => {
+          const orderId = element.dataset.orderId;
+          const clientId = element.dataset.clientId;
+          if (!orderId || !clientId) return;
+
+          element.disabled = true;
+          const originalText = element.textContent;
+          element.textContent = 'Generando…';
+          clearMessage();
+
+          try {
+            const response = await fetch('/api/billing', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ orderId })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo generar la factura');
+            }
+            showMessage('Factura generada correctamente');
+          } catch (error) {
+            console.error('Error al generar factura', error);
+            showMessage(
+              error instanceof Error ? error.message : 'Error al generar la factura',
+              true
+            );
+          } finally {
+            element.disabled = false;
+            element.textContent = originalText ?? 'Generar factura';
+          }
+        });
+      });
+    })();
+  </script>
+)}

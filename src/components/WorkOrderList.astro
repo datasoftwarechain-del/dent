@@ -1,0 +1,46 @@
+---
+type WorkOrderItem = {
+  id: string;
+  code?: string | null;
+  displayCode?: string | null;
+  status: string;
+  dueDate?: string | Date | null;
+  patient?: { name: string | null } | null;
+};
+
+const { items } = Astro.props as { items: WorkOrderItem[] };
+
+const statusLabel: Record<string, string> = {
+  CREATED: 'Creada',
+  IN_PROGRESS: 'En progreso',
+  READY: 'Lista',
+  DELIVERED: 'Entregada',
+  CANCELLED: 'Cancelada'
+};
+---
+
+<section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-white">Órdenes recientes</h2>
+    <a href="/app/work-orders" class="text-sm text-accent hover:underline">Ver todas</a>
+  </div>
+  <div class="mt-4 divide-y divide-white/5">
+    {items.length === 0 && <p class="py-8 text-sm text-slate-400">Aún no hay órdenes registradas. Crea la primera desde "Nueva orden".</p>}
+    {items.map((item) => (
+      <a href={`/app/work-orders/${item.id}`} class="flex items-center justify-between py-4 text-sm transition hover:text-accent">
+        <div>
+          <p class="font-medium text-white">{item.displayCode ?? item.code}</p>
+          <p class="text-xs text-slate-400">{item.patient?.name ?? 'Paciente sin nombre'}</p>
+        </div>
+        <div class="text-right text-xs text-slate-400">
+          <p class="rounded-full bg-white/5 px-3 py-1 text-xs uppercase tracking-wide text-white">
+            {statusLabel[item.status] ?? item.status}
+          </p>
+          <p class="mt-1">
+            Entrega {item.dueDate ? new Date(item.dueDate).toLocaleDateString('es-AR') : 'Sin fecha'}
+          </p>
+        </div>
+      </a>
+    ))}
+  </div>
+</section>

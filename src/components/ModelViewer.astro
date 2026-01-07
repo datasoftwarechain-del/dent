@@ -1,0 +1,172 @@
+---
+const { defaultUrl = '' } = Astro.props as { defaultUrl?: string };
+const id = `viewer-${Math.random().toString(36).slice(2)}`;
+---
+
+<div id={id} data-default-url={defaultUrl} class="grid gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-xl shadow-primary/10">
+  <div data-role="viewport" class="relative h-72 rounded-2xl border border-white/5 bg-slate-900/80">
+    <canvas class="size-full"></canvas>
+    <div class="absolute left-4 top-4 flex gap-2">
+      <button type="button" data-action="reset" class="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-1 text-xs font-medium text-white hover:border-accent hover:text-accent">
+        Reset
+      </button>
+      <button type="button" data-action="snapshot" class="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-1 text-xs font-medium text-white hover:border-accent hover:text-accent">
+        Snapshot
+      </button>
+    </div>
+  </div>
+  <label class="flex flex-col gap-2">
+    <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Subir archivo STL / OBJ / PLY</span>
+    <input type="file" accept=".stl,.obj,.ply" class="rounded-xl border border-dashed border-white/20 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+  </label>
+  <p class="text-xs text-slate-400">Vista previa interactiva para validar escaneos intraorales antes de enviar al laboratorio.</p>
+</div>
+
+<script type="module" is:inline>
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three-stdlib';
+  import { STLLoader } from 'three-stdlib';
+  import { OBJLoader } from 'three-stdlib';
+  import { PLYLoader } from 'three-stdlib';
+
+  const container = document.getElementById('{id}');
+  if (!(container instanceof HTMLElement)) {
+    throw new Error('ModelViewer container not found');
+  }
+
+  const canvas = container.querySelector('canvas');
+  const viewport = container.querySelector('[data-role="viewport"]');
+  const fileInput = container.querySelector('input[type="file"]');
+  const resetButton = container.querySelector('[data-action="reset"]');
+  const snapshotButton = container.querySelector('[data-action="snapshot"]');
+
+  if (!(canvas instanceof HTMLCanvasElement) || !(viewport instanceof HTMLElement) || !(fileInput instanceof HTMLInputElement)) {
+    throw new Error('ModelViewer missing elements');
+  }
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(container.clientWidth, viewport.clientHeight);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#040911');
+
+  const camera = new THREE.PerspectiveCamera(45, container.clientWidth / viewport.clientHeight, 0.1, 1000);
+  camera.position.set(2, 2, 2);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+  scene.add(ambientLight);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  directionalLight.position.set(5, 10, 7.5);
+  scene.add(directionalLight);
+
+  const grid = new THREE.GridHelper(10, 10, '#214d66', '#123244');
+  scene.add(grid);
+
+  let currentMesh = null;
+
+  const loaders = {
+    stl: new STLLoader(),
+    obj: new OBJLoader(),
+    ply: new PLYLoader()
+  };
+
+  const fitCameraToObject = (object) => {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const distance = maxDim * 1.6;
+    camera.position.set(center.x + distance, center.y + distance, center.z + distance);
+    camera.lookAt(center);
+    controls.target.copy(center);
+  };
+
+  const loadFile = async (file) => {
+    if (!file) return;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const arrayBuffer = await file.arrayBuffer();
+
+    if (currentMesh) {
+      scene.remove(currentMesh);
+      currentMesh.geometry.dispose();
+    }
+
+    if (ext === 'stl') {
+      const geometry = loaders.stl.parse(arrayBuffer);
+      geometry.computeVertexNormals();
+      currentMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#42e5d2', metalness: 0.2, roughness: 0.4 }));
+    } else if (ext === 'obj') {
+      const object = loaders.obj.parse(new TextDecoder().decode(arrayBuffer));
+      const mesh = object.children.find((child) => child instanceof THREE.Mesh);
+      if (mesh instanceof THREE.Mesh) {
+        currentMesh = mesh;
+        currentMesh.material = new THREE.MeshStandardMaterial({ color: '#42e5d2', metalness: 0.2, roughness: 0.4 });
+      } else {
+        alert('No se pudo interpretar el OBJ');
+        return;
+      }
+    } else if (ext === 'ply') {
+      const geometry = loaders.ply.parse(arrayBuffer);
+      geometry.computeVertexNormals();
+      currentMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#42e5d2', metalness: 0.2, roughness: 0.3 }));
+    } else {
+      alert('Formato no soportado. Usa STL, OBJ o PLY.');
+      return;
+    }
+
+    if (currentMesh) {
+      scene.add(currentMesh);
+      fitCameraToObject(currentMesh);
+    }
+  };
+
+  fileInput.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    const file = target.files?.[0];
+    loadFile(file);
+  });
+
+  resetButton?.addEventListener('click', () => {
+    controls.reset();
+  });
+
+  snapshotButton?.addEventListener('click', () => {
+    const dataUrl = renderer.domElement.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = 'digitaldent-snapshot.png';
+    link.click();
+  });
+
+  const animate = () => {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  };
+
+  animate();
+
+  const defaultUrl = container.dataset.defaultUrl;
+  if (defaultUrl) {
+    fetch(defaultUrl)
+      .then((res) => res.arrayBuffer())
+      .then((buffer) => loadFile(new File([buffer], defaultUrl.split('/').pop() ?? 'modelo.stl')))
+      .catch((error) => console.error('No se pudo cargar el archivo por defecto', error));
+  }
+
+  window.addEventListener('resize', () => {
+    const width = container.clientWidth;
+    const height = viewport.clientHeight;
+    renderer.setSize(width, height);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  });
+</script>

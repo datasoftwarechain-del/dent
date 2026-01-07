@@ -1,0 +1,85 @@
+---
+const baseLinks = [
+  { href: '/app/dashboard', label: 'Dashboard' },
+  { href: '/app/calendar', label: 'Agenda' },
+  { href: '/app/work-orders', label: 'Órdenes' },
+  { href: '/app/patients', label: 'Pacientes' },
+  { href: '/app/store', label: 'Tienda' },
+  { href: '/app/settings', label: 'Configuración' }
+];
+
+type AppUser = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string;
+} | null;
+
+const { user, isBillingAllowed = false } = Astro.props as {
+  user: AppUser;
+  isBillingAllowed?: boolean;
+};
+const currentPath = Astro.url.pathname;
+
+const links = isBillingAllowed
+  ? [...baseLinks.slice(0, 4), {
+    href: '/app/billing',
+    label: 'Facturación'
+  },
+  {
+    href: '/app/leads',
+    label: 'Leads'
+  }]
+  : baseLinks;
+
+const navLinks = links.map((link) => ({
+  ...link,
+  active: currentPath.startsWith(link.href),
+}));
+---
+
+<aside class="hidden min-h-screen w-64 shrink-0 border-r border-white/10 bg-slate-950/90 p-6 md:flex md:flex-col">
+  <div class="mb-8 text-sm text-slate-400">
+    <p class="text-xs uppercase tracking-wide text-slate-500">Sesión activa</p>
+    <p class="mt-1 text-sm font-semibold text-white">{user?.name ?? 'Invitado'}</p>
+    <p class="text-xs text-slate-500">{user?.email ?? 'sin sesión'}</p>
+  </div>
+
+  <nav class="space-y-1">
+    {navLinks.map((link) => (
+      <a
+        href={link.href}
+        class={`flex items-center gap-3 rounded-xl px-4 py-2 text-sm font-medium transition ${
+          link.active ? 'bg-accent/20 text-white' : 'text-slate-300 hover:bg-white/5'
+        }`}
+      >
+        {link.label}
+      </a>
+    ))}
+  </nav>
+
+  <div class="mt-auto pt-6">
+    <button
+      type="button"
+      data-action="logout"
+      class="w-full rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 hover:border-accent hover:text-accent"
+    >
+      Cerrar sesión
+    </button>
+  </div>
+</aside>
+
+<script type="module" is:inline>
+  const button = document.querySelector('[data-action="logout"]');
+  if (button instanceof HTMLButtonElement) {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = 'Cerrando sesión...';
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } finally {
+        window.location.href = '/login';
+      }
+    });
+  }
+</script>

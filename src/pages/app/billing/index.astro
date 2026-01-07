@@ -1,0 +1,660 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import { supabaseAdmin } from '@/server/db/client';
+import { getStatementByClient } from '@/server/services/billing-service';
+import { isAdmin } from '@/server/auth/permissions';
+import { WORK_TYPE_PRICES } from '@/server/services/pricing';
+import { WorkOrderStatus } from '@/server/db/types';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+if (!isAdmin(user)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+type WorkOrderLike = {
+  id: string;
+  displayCode?: string | null;
+  workType?: string | null;
+  price?: number | null;
+  updatedAt?: string | null;
+  patient?: { name: string | null } | null;
+};
+
+// Obtener usuarios que pueden tener facturas (DENTIST principalmente)
+const { data: users = [] } = await supabaseAdmin
+  .from('user_profiles')
+  .select('id,name,email,role')
+  .in('role', ['DENTIST', 'CLIENT'])
+  .order('name', { ascending: true })
+  .order('email', { ascending: true });
+
+// Obtener clientes de la tabla Client
+const { data: clientRecords = [] } = await supabaseAdmin
+  .from('clients')
+  .select('id,name')
+  .order('name', { ascending: true });
+
+// Combinar ambos en una lista unificada para el dropdown
+const clients = [
+  ...users.map(u => ({ id: u.id, name: u.name || u.email || 'Sin nombre', type: 'User', role: u.role })),
+  ...clientRecords.map(c => ({ id: c.id, name: c.name, type: 'Client', role: null }))
+].sort((a, b) => a.name.localeCompare(b.name));
+
+const clientId = Astro.url.searchParams.get('clientId') ?? '';
+const dateFrom = Astro.url.searchParams.get('dateFrom') || undefined;
+const dateTo = Astro.url.searchParams.get('dateTo') || undefined;
+const period = Astro.url.searchParams.get('period') || 'all';
+
+// Calcular fechas basado en el período seleccionado
+let calculatedDateFrom: Date | undefined;
+let calculatedDateTo: Date | undefined;
+
+if (period !== 'all' && period !== 'custom') {
+  const now = new Date();
+  calculatedDateTo = now;
+
+  switch (period) {
+    case 'month':
+      calculatedDateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case 'year':
+      calculatedDateFrom = new Date(now.getFullYear(), 0, 1);
+      break;
+    case 'last-month':
+      calculatedDateFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      calculatedDateTo = new Date(now.getFullYear(), now.getMonth(), 0);
+      break;
+    case 'last-year':
+      calculatedDateFrom = new Date(now.getFullYear() - 1, 0, 1);
+      calculatedDateTo = new Date(now.getFullYear() - 1, 11, 31);
+      break;
+  }
+} else if (period === 'custom' && dateFrom && dateTo) {
+  calculatedDateFrom = new Date(dateFrom);
+  calculatedDateTo = new Date(dateTo);
+}
+
+const finalDateFrom = calculatedDateFrom;
+const finalDateTo = calculatedDateTo;
+
+const workTypePriceMap = new Map<string, number>(
+  Object.entries(WORK_TYPE_PRICES as Record<string, number>).map(([key, value]) => [key.toUpperCase(), value])
+);
+
+const formatWorkTypeLabel = (value: string | null | undefined) => {
+  if (!value) return 'Orden de trabajo';
+  return value
+    .split('_')
+    .map((segment) => (segment.length ? segment.charAt(0) + segment.slice(1).toLowerCase() : segment))
+    .join(' ');
+};
+
+const priceForOrder = (order: Pick<WorkOrderLike, 'workType' | 'price'>) => {
+  if (order.price) return Number(order.price);
+  if (!order.workType) return 0;
+  return workTypePriceMap.get(order.workType) ?? 0;
+};
+
+let statement: Awaited<ReturnType<typeof getStatementByClient>> | null = null;
+let statementError: string | null = null;
+let pendingOrders: WorkOrderLike[] = [];
+
+if (clientId) {
+  try {
+    statement = await getStatementByClient(clientId, finalDateFrom, finalDateTo);
+  } catch (error) {
+    statementError = error instanceof Error ? error.message : 'No se pudo obtener el estado de cuenta';
+  }
+
+  const { data: orders = [] } = await supabaseAdmin
+    .from('work_orders')
+    .select('id,displayCode,workType,price,updatedAt,patient:patientId(name)')
+    .eq('dentistId', clientId)
+    .in('status', [WorkOrderStatus.DONE, WorkOrderStatus.DELIVERED])
+    .order('updatedAt', { ascending: false });
+
+  const { data: invoiceLinks = [] } = await supabaseAdmin
+    .from('invoices')
+    .select('workOrderId')
+    .not('workOrderId', 'is', null);
+
+  const invoicedIds = new Set(
+    (invoiceLinks ?? []).map((row) => row.workOrderId).filter((id): id is string => !!id)
+  );
+
+  pendingOrders = (orders ?? []).filter((order) => !invoicedIds.has(order.id));
+}
+---
+
+<AppLayout title="Facturación" description="Gestiona facturas y pagos de clientes" user={user}>
+  <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h1 class="text-lg font-semibold text-white">Estado de cuenta</h1>
+        <p class="text-sm text-slate-400">Selecciona un cliente para ver sus movimientos.</p>
+      </div>
+      <form method="get" class="grid w-full gap-4 md:grid-cols-[2fr_1fr_auto]">
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Cliente</label>
+          <select
+            name="clientId"
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          >
+            <option value="">Selecciona un cliente…</option>
+            {clients.map((client) => (
+              <option value={client.id} selected={client.id === clientId}>
+                {client.name}{client.type === 'User' && client.role ? ` (${client.role})` : client.type === 'Client' ? ' (Cliente)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Período</label>
+          <select
+            name="period"
+            id="period-select"
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          >
+            <option value="all" selected={period === 'all'}>Todos</option>
+            <option value="month" selected={period === 'month'}>Este mes</option>
+            <option value="year" selected={period === 'year'}>Este año</option>
+            <option value="last-month" selected={period === 'last-month'}>Mes anterior</option>
+            <option value="last-year" selected={period === 'last-year'}>Año anterior</option>
+            <option value="custom" selected={period === 'custom'}>Personalizado</option>
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button class="rounded-xl bg-accent px-6 py-2 text-sm font-semibold text-white transition hover:bg-accent/90">
+            Filtrar
+          </button>
+        </div>
+      </form>
+
+      <div id="custom-dates" class={`mt-4 grid gap-4 md:grid-cols-2 ${period === 'custom' ? '' : 'hidden'}`}>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Desde</label>
+          <input
+            type="date"
+            name="dateFrom"
+            value={dateFrom}
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          />
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Hasta</label>
+          <input
+            type="date"
+            name="dateTo"
+            value={dateTo}
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {clientId && (
+    <section class="mt-6 space-y-6">
+      <div
+        id="billing-feedback"
+        class="hidden rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+      ></div>
+
+      {pendingOrders.length > 0 && (
+        <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+          <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 class="text-base font-semibold text-white">Órdenes pendientes de facturación</h2>
+              <p class="text-sm text-slate-400">Genera la factura para registrar la deuda correspondiente.</p>
+            </div>
+          </div>
+          <div class="mt-4 overflow-x-auto">
+            <table class="min-w-full divide-y divide-white/10 text-sm text-slate-200">
+              <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="px-4 py-3">Orden</th>
+                  <th class="px-4 py-3">Tipo</th>
+                  <th class="px-4 py-3">Paciente</th>
+                  <th class="px-4 py-3">Monto estimado</th>
+                  <th class="px-4 py-3">Actualizado</th>
+                  <th class="px-4 py-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/10">
+                {pendingOrders.map((order) => (
+                  <tr class="hover:bg-white/5">
+                    <td class="px-4 py-3 font-semibold text-white">{order.displayCode}</td>
+                    <td class="px-4 py-3">{formatWorkTypeLabel(order.workType)}</td>
+                    <td class="px-4 py-3">{order.patient?.name ?? '-'}</td>
+                    <td class="px-4 py-3">${priceForOrder(order).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                    <td class="px-4 py-3 text-sm text-slate-400">{new Date(order.updatedAt).toLocaleDateString('es-AR')}</td>
+                    <td class="px-4 py-3">
+                      <button
+                        type="button"
+                        class="rounded-lg border border-white/10 bg-accent/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-accent transition hover:bg-accent/20"
+                        data-generate-invoice
+                        data-order-id={order.id}
+                      >
+                        Generar factura
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-white">Registrar pago</h2>
+            <p class="text-sm text-slate-400">Carga una entrega para actualizar el saldo del cliente.</p>
+          </div>
+        </div>
+        <form id="payment-form" class="mt-4 grid gap-4 md:grid-cols-[1fr_160px_1fr_auto]" data-client-id={clientId}>
+          <input
+            name="amount"
+            type="number"
+            step="0.01"
+            min="0"
+            required
+            placeholder="Monto"
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          />
+          <input
+            name="date"
+            type="date"
+            value={new Date().toISOString().slice(0, 10)}
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          />
+          <input
+            name="note"
+            type="text"
+            placeholder="Nota opcional"
+            class="rounded-xl border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-white focus:border-accent focus:outline-none"
+          />
+          <button
+            type="submit"
+            class="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90"
+          >
+            Registrar pago
+          </button>
+        </form>
+      </section>
+
+      <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-white">Movimientos</h2>
+            <p class="text-sm text-slate-400">
+              Visualiza las facturas emitidas y pagos recibidos en orden cronológico.
+            </p>
+          </div>
+        </div>
+        {statementError && (
+          <p class="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {statementError}
+          </p>
+        )}
+        {!statementError && statement && (
+          <div class="mt-4 overflow-x-auto">
+            <table class="min-w-full divide-y divide-white/10 text-sm text-slate-200">
+              <thead class="text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="px-4 py-3">Fecha</th>
+                  <th class="px-4 py-3">Nº Orden / Comp.</th>
+                  <th class="px-4 py-3">Detalle</th>
+                  <th class="px-4 py-3">Paciente</th>
+                  <th class="px-4 py-3 text-right">Facturas</th>
+                  <th class="px-4 py-3 text-right">Entregas</th>
+                  <th class="px-4 py-3 text-right">Saldo</th>
+                  <th class="px-4 py-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/10">
+                {statement.rows.length === 0 && (
+                  <tr>
+                    <td class="px-4 py-6 text-center text-sm text-slate-400" colSpan={8}>
+                      No hay movimientos registrados.
+                    </td>
+                  </tr>
+                )}
+                {statement.rows.map((row) => (
+                  <tr class="hover:bg-white/5">
+                    <td class="px-4 py-3 text-sm text-slate-400">{new Date(row.fecha).toLocaleString('es-AR')}</td>
+                    <td class="px-4 py-3 font-semibold text-white">{row.compNro || '—'}</td>
+                    <td class="px-4 py-3">{row.detalle}</td>
+                    <td class="px-4 py-3">{row.paciente}</td>
+                    <td class="px-4 py-3 text-right">
+                      {row.tipo === 'FACTURA' && row.invoiceId && (
+                        <div class="flex items-center justify-end gap-2">
+                          <span>$</span>
+                          <input
+                            type="number"
+                            class="invoice-amount-input w-24 rounded-lg border border-white/10 bg-slate-900/70 px-2 py-1 text-right text-sm text-white focus:border-accent focus:outline-none"
+                            value={row.facturas}
+                            step="0.01"
+                            min="0"
+                            data-invoice-id={row.invoiceId}
+                            data-original-amount={row.facturas}
+                          />
+                          <button
+                            type="button"
+                            class="save-invoice-btn hidden rounded-lg bg-accent px-2 py-1 text-xs font-semibold text-white hover:bg-accent/90"
+                            data-invoice-id={row.invoiceId}
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      )}
+                      {row.tipo !== 'FACTURA' && (
+                        row.facturas ? `$ ${row.facturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '—'
+                      )}
+                      {row.tipo === 'FACTURA' && !row.invoiceId && (
+                        row.facturas ? `$ ${row.facturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '—'
+                      )}
+                    </td>
+                    <td class="px-4 py-3 text-right">{row.entregas ? `$ ${row.entregas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}` : '—'}</td>
+                    <td class="px-4 py-3 text-right font-semibold text-white">$ {row.saldoAcumulado.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                    <td class="px-4 py-3">
+                      <div class="flex items-center gap-2">
+                        {row.tipo === 'FACTURA' && row.invoiceId && (
+                          <button
+                            type="button"
+                            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20"
+                            data-delete-invoice
+                            data-invoice-id={row.invoiceId}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                        {row.tipo === 'PAGO' && row.paymentId && (
+                          <button
+                            type="button"
+                            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20"
+                            data-delete-payment
+                            data-payment-id={row.paymentId}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot class="border-t border-white/10 text-sm">
+                <tr>
+                  <td class="px-4 py-3 font-semibold text-white" colSpan={4}>Totales</td>
+                  <td class="px-4 py-3 text-right font-semibold text-white">$ {statement.totals.facturas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                  <td class="px-4 py-3 text-right font-semibold text-white">$ {statement.totals.entregas.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                  <td class="px-4 py-3 text-right font-semibold text-white">$ {statement.totals.saldo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </section>
+    </section>
+  )}
+</AppLayout>
+
+<script is:inline>
+  (() => {
+    const periodSelect = document.getElementById('period-select');
+    const customDates = document.getElementById('custom-dates');
+
+    if (periodSelect && customDates) {
+      periodSelect.addEventListener('change', () => {
+        if (periodSelect.value === 'custom') {
+          customDates.classList.remove('hidden');
+        } else {
+          customDates.classList.add('hidden');
+        }
+      });
+    }
+  })();
+</script>
+
+{clientId && (
+  <script is:inline>
+    (() => {
+      const feedback = document.getElementById('billing-feedback');
+      const showMessage = (message, isError = false) => {
+        if (!feedback) return;
+        feedback.textContent = message;
+        feedback.classList.remove('hidden');
+        feedback.classList.toggle('bg-red-500/10', isError);
+        feedback.classList.toggle('border-red-500/20', isError);
+        feedback.classList.toggle('text-red-200', isError);
+        feedback.classList.toggle('bg-emerald-500/10', !isError);
+        feedback.classList.toggle('border-emerald-500/20', !isError);
+        feedback.classList.toggle('text-emerald-200', !isError);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      const clearMessage = () => {
+        if (!feedback) return;
+        feedback.classList.add('hidden');
+      };
+
+      document.querySelectorAll('[data-generate-invoice]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          const orderId = button.dataset.orderId;
+          if (!orderId) return;
+
+          button.disabled = true;
+          button.textContent = 'Generando…';
+          clearMessage();
+
+          try {
+            const response = await fetch('/api/billing', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ orderId })
+            });
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo crear la factura');
+            }
+            showMessage('Factura generada correctamente');
+            window.location.reload();
+          } catch (error) {
+            console.error('Invoice error', error);
+            showMessage(error instanceof Error ? error.message : 'Error al generar la factura', true);
+            button.disabled = false;
+            button.textContent = 'Generar factura';
+          }
+        });
+      });
+
+      const paymentForm = document.getElementById('payment-form');
+      if (paymentForm instanceof HTMLFormElement) {
+        paymentForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(paymentForm);
+          const amount = formData.get('amount');
+          const date = formData.get('date');
+          const note = formData.get('note');
+          const clientId = paymentForm.dataset.clientId;
+
+          if (!clientId) return;
+
+          const payload = {
+            clientId,
+            amount,
+            date,
+            note
+          };
+
+          const submitButton = paymentForm.querySelector('button[type="submit"]');
+          if (submitButton instanceof HTMLButtonElement) {
+            submitButton.disabled = true;
+            submitButton.textContent = 'Registrando…';
+          }
+          clearMessage();
+
+          try {
+            const response = await fetch('/api/billing/payments', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo registrar el pago');
+            }
+            showMessage('Pago registrado correctamente');
+            window.location.reload();
+          } catch (error) {
+            console.error('Payment error', error);
+            showMessage(error instanceof Error ? error.message : 'Error al registrar el pago', true);
+            if (submitButton instanceof HTMLButtonElement) {
+              submitButton.disabled = false;
+              submitButton.textContent = 'Registrar pago';
+            }
+          }
+        });
+      }
+
+      document.querySelectorAll('[data-delete-payment]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          const paymentId = button.dataset.paymentId;
+          if (!paymentId) return;
+
+          if (!confirm('¿Está seguro de que desea eliminar este pago? Esta acción no se puede deshacer.')) {
+            return;
+          }
+
+          const originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Eliminando…';
+          clearMessage();
+
+          try {
+            const response = await fetch(`/api/billing/payments/${paymentId}`, {
+              method: 'DELETE',
+              headers: { 'content-type': 'application/json' }
+            });
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo eliminar el pago');
+            }
+            showMessage('Pago eliminado correctamente');
+            window.location.reload();
+          } catch (error) {
+            console.error('Delete payment error', error);
+            showMessage(error instanceof Error ? error.message : 'Error al eliminar el pago', true);
+            button.disabled = false;
+            button.textContent = originalText;
+          }
+        });
+      });
+
+      // Manejar edición de facturas
+      document.querySelectorAll('.invoice-amount-input').forEach((input) => {
+        if (!(input instanceof HTMLInputElement)) return;
+        const invoiceId = input.dataset.invoiceId;
+        if (!invoiceId) return;
+
+        const saveBtn = document.querySelector(`.save-invoice-btn[data-invoice-id="${invoiceId}"]`);
+
+        input.addEventListener('input', () => {
+          const originalAmount = parseFloat(input.dataset.originalAmount || '0');
+          const currentAmount = parseFloat(input.value);
+
+          if (currentAmount !== originalAmount && saveBtn) {
+            saveBtn.classList.remove('hidden');
+          } else if (saveBtn) {
+            saveBtn.classList.add('hidden');
+          }
+        });
+      });
+
+      // Guardar cambios de factura
+      document.querySelectorAll('.save-invoice-btn').forEach((button) => {
+        button.addEventListener('click', async () => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          const invoiceId = button.dataset.invoiceId;
+          if (!invoiceId) return;
+
+          const input = document.querySelector(`.invoice-amount-input[data-invoice-id="${invoiceId}"]`);
+          if (!(input instanceof HTMLInputElement)) return;
+
+          const newAmount = parseFloat(input.value);
+          if (isNaN(newAmount) || newAmount <= 0) {
+            showMessage('Monto inválido', true);
+            return;
+          }
+
+          button.disabled = true;
+          button.textContent = '...';
+          clearMessage();
+
+          try {
+            const response = await fetch(`/api/billing/invoices/${invoiceId}`, {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ amount: newAmount })
+            });
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo actualizar la factura');
+            }
+            showMessage('Factura actualizada correctamente');
+            window.location.reload();
+          } catch (error) {
+            console.error('Update invoice error', error);
+            showMessage(error instanceof Error ? error.message : 'Error al actualizar la factura', true);
+            button.disabled = false;
+            button.textContent = '✓';
+          }
+        });
+      });
+
+      // Eliminar facturas
+      document.querySelectorAll('[data-delete-invoice]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          if (!(button instanceof HTMLButtonElement)) return;
+          const invoiceId = button.dataset.invoiceId;
+          if (!invoiceId) return;
+
+          if (!confirm('¿Está seguro de que desea eliminar esta factura? Esta acción eliminará también todos los pagos asociados y no se puede deshacer.')) {
+            return;
+          }
+
+          const originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Eliminando…';
+          clearMessage();
+
+          try {
+            const response = await fetch(`/api/billing/invoices/${invoiceId}`, {
+              method: 'DELETE',
+              headers: { 'content-type': 'application/json' }
+            });
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.error ?? 'No se pudo eliminar la factura');
+            }
+            showMessage('Factura eliminada correctamente');
+            window.location.reload();
+          } catch (error) {
+            console.error('Delete invoice error', error);
+            showMessage(error instanceof Error ? error.message : 'Error al eliminar la factura', true);
+            button.disabled = false;
+            button.textContent = originalText;
+          }
+        });
+      });
+    })();
+  </script>
+)}

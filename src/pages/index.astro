@@ -1,0 +1,85 @@
+---
+import PublicLayout from '@/layouts/PublicLayout.astro';
+---
+
+<PublicLayout title="DigitalDent - El futuro de la odontología digital">
+  <section class="bg-slate-950 text-white">
+    <div class="container mx-auto px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold md:text-6xl">El Futuro de la Odontología Digital</h1>
+      <p class="mt-4 text-lg text-slate-300">La plataforma perfecta para trabajar y avanzar hacia el futuro con odontología digital.</p>
+      <div class="mt-8">
+        <a href="#lead-form" class="rounded-full bg-primary px-8 py-4 font-semibold text-white hover:bg-primary/90">Solicita una Demostración</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-slate-900 py-20">
+    <div class="container mx-auto px-6">
+      <div class="grid items-center gap-12 md:grid-cols-2">
+        <div>
+          <h2 class="text-3xl font-bold text-white">DigitalDent en Acción</h2>
+          <p class="mt-4 text-slate-300">Mira cómo nuestra plataforma puede transformar tu flujo de trabajo y llevar tu laboratorio o clínica al siguiente nivel.</p>
+          <div class="mt-8 aspect-video rounded-xl bg-slate-800"></div>
+        </div>
+        <div>
+          <img src="/assets/blog/example-blog/screenshot.png" alt="App Screenshot" class="rounded-xl shadow-2xl" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="lead-form" class="bg-slate-950 py-20">
+    <div class="container mx-auto max-w-2xl px-6">
+      <h2 class="text-center text-3xl font-bold text-white">Conviértete en un Pionero Digital</h2>
+      <p class="mt-4 text-center text-slate-300">Déjanos tus datos y te contactaremos para mostrarte cómo DigitalDent puede revolucionar tu trabajo.</p>
+      <form id="lead-form-el" class="mt-8 space-y-6">
+        <div>
+          <label for="name" class="block text-sm font-medium text-slate-300">Nombre</label>
+          <input type="text" id="name" name="name" required class="mt-1 block w-full rounded-xl border-white/10 bg-slate-900/70 px-4 py-3 text-white focus:border-accent focus:outline-none" />
+        </div>
+        <div>
+          <label for="email" class="block text-sm font-medium text-slate-300">Email</label>
+          <input type="email" id="email" name="email" required class="mt-1 block w-full rounded-xl border-white/10 bg-slate-900/70 px-4 py-3 text-white focus:border-accent focus:outline-none" />
+        </div>
+        <div>
+          <label for="phone" class="block text-sm font-medium text-slate-300">Teléfono</label>
+          <input type="tel" id="phone" name="phone" class="mt-1 block w-full rounded-xl border-white/10 bg-slate-900/70 px-4 py-3 text-white focus:border-accent focus:outline-none" />
+        </div>
+        <div>
+          <button type="submit" class="w-full rounded-full bg-primary px-8 py-4 font-semibold text-white hover:bg-primary/90">Enviar</button>
+        </div>
+      </form>
+      <p id="lead-feedback" class="mt-4 text-center text-sm text-slate-300"></p>
+
+<script>
+  const form = document.getElementById('lead-form-el');
+  const feedback = document.getElementById('lead-feedback');
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    feedback.textContent = 'Enviando...';
+
+    const formData = new FormData(form);
+    const payload = Object.fromEntries(formData.entries());
+
+    try {
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        feedback.textContent = '¡Gracias por tu interés! Nos pondremos en contacto contigo pronto.';
+        form.reset();
+      } else {
+        feedback.textContent = 'Hubo un error al enviar tus datos. Por favor, inténtalo de nuevo.';
+      }
+    } catch (error) {
+      feedback.textContent = 'Hubo un error al enviar tus datos. Por favor, inténtalo de nuevo.';
+    }
+  });
+</script>
+    </div>
+  </section>
+</PublicLayout>

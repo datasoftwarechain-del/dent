@@ -1,0 +1,49 @@
+<section id="funcionalidad" class="bg-slate-950 py-20">
+  <div class="mx-auto max-w-6xl px-6">
+    <div class="mx-auto max-w-3xl text-center">
+      <h2 class="text-3xl font-bold text-white md:text-4xl">Plataforma integral para clínicas digitales</h2>
+      <p class="mt-4 text-lg text-slate-300">
+        Todo el circuito: registro clínico, órdenes, modelado 3D, facturación y alertas, con experiencias diferenciadas por rol.
+      </p>
+    </div>
+    <div class="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {[
+        {
+          title: 'Workflows en tiempo real',
+          description:
+            'Actualiza estados, registra eventos y comparte archivos en canales privados por orden. Notificaciones web, email y WhatsApp.'
+        },
+        {
+          title: 'Visor 3D avanzado',
+          description:
+            'Sube STL/PLY/OBJ, orbita, mide distancias y genera snapshots para compartir con el laboratorio o el paciente.'
+        },
+        {
+          title: 'Agenda inteligente',
+          description:
+            'Sincroniza turnos con Google Calendar, arrastra y suelta citas y genera recordatorios automáticos para tus pacientes.'
+        },
+        {
+          title: 'Facturación y cuenta corriente',
+          description:
+            'Factura por trabajo, controla pagos parciales y genera reportes en PDF/CSV con el balance actualizado por cliente.'
+        },
+        {
+          title: 'Tienda de insumos integrada',
+          description:
+            'Catálogo con variantes, carrito persistente y checkout con Stripe en modo test listo para producción.'
+        },
+        {
+          title: 'Automatizaciones con BullMQ',
+          description:
+            'Alertas programadas N días antes de la entrega, recordatorios de pagos y sincronización nocturna de inventario.'
+        }
+      ].map((feature) => (
+        <article class="rounded-2xl border border-white/10 bg-slate-900/60 p-6 shadow-lg shadow-primary/5">
+          <h3 class="text-lg font-semibold text-white">{feature.title}</h3>
+          <p class="mt-3 text-sm text-slate-300">{feature.description}</p>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

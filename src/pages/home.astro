@@ -1,0 +1,31 @@
+---
+import PublicLayout from '@/layouts/PublicLayout.astro';
+import HeroSection from '@/components/HeroSection.astro';
+import FeaturesSection from '@/components/FeaturesSection.astro';
+import WorkflowSection from '@/components/WorkflowSection.astro';
+import ClientsSection from '@/components/ClientsSection.astro';
+import ContactForm from '@/components/ContactForm.astro';
+---
+
+<PublicLayout>
+  <HeroSection />
+  <FeaturesSection />
+  <WorkflowSection />
+  <ClientsSection />
+  <section id="contacto" class="bg-slate-900/50 py-20">
+    <div class="mx-auto grid max-w-6xl gap-12 px-6 md:grid-cols-[1.1fr_0.9fr] md:items-center">
+      <div class="space-y-6">
+        <h2 class="text-3xl font-bold text-white md:text-4xl">Coordina una demo con nuestro equipo</h2>
+        <p class="text-lg text-slate-300">
+          Cuéntanos tu flujo actual y te ayudamos a migrar pacientes, trabajos en curso y configuraciones de laboratorio en menos de 7 días.
+        </p>
+        <ul class="space-y-3 text-sm text-slate-300">
+          <li>• Onboarding asistido y capacitación para equipos clínicos y técnicos.</li>
+          <li>• Integraciones opcionales con scanners 3Shape, Medit y exocad.</li>
+          <li>• SLA de soporte 24/7 con especialistas en flujo dental digital.</li>
+        </ul>
+      </div>
+      <ContactForm />
+    </div>
+  </section>
+</PublicLayout>

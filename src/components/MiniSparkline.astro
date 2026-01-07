@@ -1,0 +1,33 @@
+---
+const { data, stroke = '#38bdf8' } = Astro.props as {
+  data: { date: string; count: number }[];
+  stroke?: string;
+};
+
+const values = data.map((item) => item.count);
+const max = Math.max(...values, 1);
+const min = Math.min(...values, 0);
+const range = max - min || 1;
+const width = Math.max(data.length - 1, 1) * 20;
+const height = 60;
+
+const points = data
+  .map((point, index) => {
+    const x = (width / Math.max(data.length - 1, 1)) * index;
+    const normalized = (point.count - min) / range;
+    const y = height - normalized * height;
+    return `${x},${y}`;
+  })
+  .join(' ');
+---
+
+<svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" class="h-16 w-full text-accent/80">
+  <polyline
+    points={points}
+    fill="none"
+    stroke={stroke}
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

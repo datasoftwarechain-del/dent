@@ -1,0 +1,60 @@
+---
+const {
+  title = 'Agenda mensual'
+} = Astro.props as {
+  title?: string;
+};
+---
+
+<section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+  <header class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-white">{title}</h2>
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        data-action="prev-month"
+        class="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Mes anterior"
+      >
+        <span aria-hidden="true">‹</span>
+      </button>
+      <div
+        data-role="month-label"
+        class="rounded-full border border-white/5 bg-white/5 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white"
+      >
+        ---
+      </div>
+      <button
+        type="button"
+        data-action="next-month"
+        class="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Mes siguiente"
+      >
+        <span aria-hidden="true">›</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mt-6">
+    <div class="grid grid-cols-7 gap-1 text-center text-xs uppercase tracking-wide text-slate-400">
+      <span>Lun</span>
+      <span>Mar</span>
+      <span>Mié</span>
+      <span>Jue</span>
+      <span>Vie</span>
+      <span>Sáb</span>
+      <span>Dom</span>
+    </div>
+
+    <div
+      data-role="month-grid"
+      class="mt-4 grid grid-cols-7 gap-1 text-sm"
+      role="grid"
+      aria-label="Calendario de turnos"
+    >
+      <!-- Días del mes generados por script -->
+    </div>
+
+    <p data-role="month-feedback" class="mt-4 hidden rounded-2xl bg-white/5 px-4 py-3 text-sm text-slate-300"></p>
+  </div>
+</section>

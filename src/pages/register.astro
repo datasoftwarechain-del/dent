@@ -1,0 +1,109 @@
+---
+import PublicLayout from '@/layouts/PublicLayout.astro';
+
+if (Astro.locals.user) {
+  return Astro.redirect('/app/dashboard');
+}
+---
+
+<PublicLayout title="Solicitar acceso | DigitalDent" showNavLogin={false}>
+  <section class="bg-slate-950 py-16">
+    <div class="mx-auto grid max-w-5xl gap-10 px-6 md:grid-cols-2 md:items-start">
+      <div class="space-y-5">
+        <h1 class="text-3xl font-bold text-white md:text-4xl">Activa tu instancia de DigitalDent</h1>
+        <p class="text-lg text-slate-300">
+          Crea un usuario administrador para tu clínica o laboratorio. Puedes invitarnos a una reunión de onboarding y migramos tus datos existentes.
+        </p>
+        <ul class="space-y-3 text-sm text-slate-300">
+          <li>• Roles soportados: administrador, odontólogo, laboratorio y cliente.</li>
+          <li>• 30 días de prueba gratuitos con todas las integraciones activas.</li>
+          <li>• Soporte prioritario de nuestro equipo técnico.</li>
+        </ul>
+      </div>
+      <div class="rounded-3xl border border-white/10 bg-slate-900/70 p-8 shadow-2xl shadow-primary/10">
+        <form id="register-form" class="space-y-5">
+          <label class="flex flex-col gap-2 text-sm font-medium text-white">
+            <span>Nombre completo</span>
+            <input name="name" required class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+          </label>
+          <label class="flex flex-col gap-2 text-sm font-medium text-white">
+            <span>Email corporativo</span>
+            <input type="email" name="email" required class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+          </label>
+          <label class="flex flex-col gap-2 text-sm font-medium text-white">
+            <span>Contraseña</span>
+            <input type="password" name="password" minlength="8" required class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+          </label>
+          <label class="flex flex-col gap-2 text-sm font-medium text-white">
+            <span>Rol principal</span>
+            <select name="role" class="w-full rounded-xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none">
+              <option value="CLIENT">Cliente</option>
+              <option value="CLINIC_ADMIN">Clínica</option>
+              <option value="DENTIST">Odontólogo</option>
+              <option value="LAB">Laboratorio</option>
+              <option value="TECHNICIAN">Técnico</option>
+            </select>
+          </label>
+          <button type="submit" class="w-full rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary/90">
+            Crear cuenta
+          </button>
+          <p id="register-feedback" class="text-sm text-slate-300"></p>
+        </form>
+        <p class="mt-6 text-center text-xs text-slate-500">
+          ¿Ya tienes cuenta? <a href="/login" class="text-accent hover:underline">Inicia sesión</a>
+        </p>
+      </div>
+    </div>
+  </section>
+  <script slot="scripts" type="module" is:inline>
+      const form = document.getElementById('register-form');
+      const feedback = document.getElementById('register-feedback');
+
+      const parseResponse = async (response) => {
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('application/json')) {
+          try {
+            return await response.json();
+          } catch {
+            return {};
+          }
+        }
+
+        const text = await response.text();
+        return text ? { error: text } : {};
+      };
+
+      if (form instanceof HTMLFormElement && feedback) {
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          feedback.textContent = 'Creando cuenta...';
+          feedback.classList.remove('text-red-400');
+
+          const formData = new FormData(form);
+          const payload = Object.fromEntries(formData.entries());
+
+          try {
+            const response = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const result = await parseResponse(response);
+            if (!response.ok || !result?.success) {
+              const message = result?.error || `No pudimos crear la cuenta (${response.status})`;
+              throw new Error(message);
+            }
+            if (result?.requiresEmailConfirmation) {
+              feedback.textContent = 'Cuenta creada. Revisa tu email para confirmar y luego inicia sesión.';
+              return;
+            }
+            feedback.textContent = 'Cuenta creada. Redirigiendo al panel...';
+            window.location.href = '/app/dashboard';
+          } catch (error) {
+            feedback.textContent = error instanceof Error ? error.message : 'Ups, algo falló';
+            feedback.classList.add('text-red-400');
+          }
+        });
+      }
+  </script>
+</PublicLayout>

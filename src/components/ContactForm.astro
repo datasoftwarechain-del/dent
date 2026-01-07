@@ -1,0 +1,78 @@
+<form id="lead-form" class="grid gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-8 shadow-2xl shadow-primary/10">
+  <label class="flex flex-col gap-2 text-sm font-medium text-white">
+    <span>Nombre completo</span>
+    <input name="fullName" required class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+  </label>
+  <div class="grid gap-4 md:grid-cols-2">
+    <label class="flex flex-col gap-2 text-sm font-medium text-white">
+      <span>Email</span>
+      <input type="email" name="email" required class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+    </label>
+    <label class="flex flex-col gap-2 text-sm font-medium text-white">
+      <span>Teléfono</span>
+      <input name="phone" class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+    </label>
+  </div>
+  <label class="flex flex-col gap-2 text-sm font-medium text-white">
+    <span>Clínica / Laboratorio</span>
+    <input name="organization" class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none" />
+  </label>
+  <label class="flex flex-col gap-2 text-sm font-medium text-white">
+    <span>Mensaje</span>
+    <textarea name="message" rows="4" class="w-full rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-white focus:border-accent focus:outline-none"></textarea>
+  </label>
+  <button type="submit" class="inline-flex items-center justify-center rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-70">
+    Enviar
+  </button>
+  <p id="lead-feedback" class="text-sm text-slate-300"></p>
+</form>
+
+<script type="module" is:inline>
+  const form = document.getElementById('lead-form');
+  const feedback = document.getElementById('lead-feedback');
+  const submitBtn = form?.querySelector('button[type="submit"]');
+
+  if (form instanceof HTMLFormElement && feedback) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      feedback.textContent = 'Enviando...';
+      feedback.classList.remove('text-red-400');
+      feedback.classList.add('text-slate-300');
+      submitBtn?.setAttribute('disabled', 'true');
+
+      const formData = new FormData(form);
+      const payload = {
+        fullName: String(formData.get('fullName') ?? '').trim(),
+        email: String(formData.get('email') ?? '').trim(),
+        phone: String(formData.get('phone') ?? '').trim(),
+        organization: String(formData.get('organization') ?? '').trim(),
+        message: String(formData.get('message') ?? '').trim()
+      };
+
+      try {
+        const response = await fetch('/api/leads', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (response.ok && result?.ok) {
+          feedback.textContent = '¡Gracias! Nos pondremos en contacto en menos de 24 horas.';
+          form.reset();
+        } else {
+          throw new Error(result?.error || 'No pudimos enviar tu solicitud.');
+        }
+      } catch (error) {
+        feedback.textContent = error instanceof Error ? error.message : 'Algo salió mal.';
+        feedback.classList.remove('text-slate-300');
+        feedback.classList.add('text-red-400');
+      } finally {
+        submitBtn?.removeAttribute('disabled');
+      }
+    });
+  }
+</script>

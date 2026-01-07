@@ -1,0 +1,488 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import { isAdmin } from '@/server/auth/permissions';
+
+type DashboardResponse = {
+  ok: boolean;
+  period: {
+    todayISO: string;
+    month: string;
+  };
+  kpis: {
+    todaysPatientsConfirmed: number;
+    revenueMTD: number;
+    revenueMTDChangePct: number;
+    upcomingNewConsults: number;
+  };
+  overview: {
+    occupancyPctToday: number;
+    newPatientsThisMonth: number;
+    nextPatients: Array<{ name: string; treatment?: string; timeISO: string }>;
+  };
+  treatmentProgress: {
+    label: string;
+    steps: number;
+    current: number;
+  };
+  agenda: Array<{ time: string; patient: string; treatment?: string; status?: string }>;
+  recentOrders: Array<{
+    id: string;
+    code: string;
+    createdAt: string;
+    status: string;
+    workType: string | null | undefined;
+    patient: string;
+    client: string;
+  }>;
+};
+
+type NotificationItem = {
+  id: string;
+  code: string;
+  dueDateISO: string;
+  status: string;
+  workType: string | null | undefined;
+  patient: string;
+  client: string;
+};
+
+type NotificationsResponse = {
+  ok: boolean;
+  notifications: NotificationItem[];
+};
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const userIsAdmin = isAdmin(user);
+
+const defaultData: DashboardResponse = {
+  ok: true,
+  period: {
+    todayISO: new Date().toISOString(),
+    month: ''
+  },
+  kpis: {
+    todaysPatientsConfirmed: 0,
+    revenueMTD: 0,
+    revenueMTDChangePct: 0,
+    upcomingNewConsults: 0
+  },
+  overview: {
+    occupancyPctToday: 0,
+    newPatientsThisMonth: 0,
+    nextPatients: []
+  },
+  treatmentProgress: {
+    label: 'Sin tratamientos activos',
+    steps: 0,
+    current: 0
+  },
+  agenda: [],
+  recentOrders: []
+};
+
+let dashboard = defaultData;
+const defaultNotifications: NotificationItem[] = [];
+let notifications: NotificationItem[] = defaultNotifications;
+const cookieHeader = Astro.request.headers.get('cookie') ?? undefined;
+
+const fetchWithSession = async (path: string) => {
+  const url = new URL(path, Astro.request.url);
+  const headers = new Headers();
+  if (cookieHeader) {
+    headers.set('cookie', cookieHeader);
+  }
+  return fetch(url, { headers });
+};
+
+try {
+  const response = await fetchWithSession('/api/dashboard');
+  if (response.ok) {
+    const payload = (await response.json()) as DashboardResponse;
+    if (payload.ok) {
+      dashboard = payload;
+    }
+  }
+} catch (error) {
+  console.error('No se pudo obtener el resumen del dashboard', error);
+}
+
+try {
+  const response = await fetchWithSession('/api/notifications');
+  if (response.ok) {
+    const payload = (await response.json()) as NotificationsResponse;
+    if (payload.ok) {
+      notifications = payload.notifications ?? [];
+    }
+  }
+} catch (error) {
+  console.error('No se pudieron obtener las notificaciones del dashboard', error);
+}
+
+const numberFormatter = new Intl.NumberFormat('es-AR', {
+  maximumFractionDigits: 0
+});
+const currencyFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  maximumFractionDigits: 0
+});
+const percentFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'percent',
+  maximumFractionDigits: 1
+});
+
+const formatTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+const formatDay = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-AR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long'
+  });
+
+const formatOrderType = (value: string | null | undefined) => {
+  if (!value) return 'Sin tipo';
+  return value
+    .split('_')
+    .map((segment) => (segment.length ? segment[0] + segment.slice(1).toLowerCase() : segment))
+    .join(' ');
+};
+
+const formatOrderDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('es-AR', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+const clampPercentage = (value: number) => Math.min(100, Math.max(0, value));
+
+const occupancyValue = clampPercentage(dashboard.overview.occupancyPctToday ?? 0);
+const newPatientsGoal = 10;
+const newPatientsValue = dashboard.overview.newPatientsThisMonth ?? 0;
+const newPatientsPct =
+  newPatientsGoal > 0 ? clampPercentage((newPatientsValue / newPatientsGoal) * 100) : 0;
+
+const circleRadius = 28;
+const circumference = 2 * Math.PI * circleRadius;
+const occupancyOffset = circumference - (occupancyValue / 100) * circumference;
+const newPatientsOffset = circumference - (newPatientsPct / 100) * circumference;
+
+const revenueDelta = dashboard.kpis.revenueMTDChangePct ?? 0;
+const revenueDeltaFormatted = percentFormatter.format(revenueDelta / 100);
+const revenueDeltaLabel = revenueDelta >= 0 ? `+${revenueDeltaFormatted}` : revenueDeltaFormatted;
+const revenueDeltaColor = revenueDelta >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
+const agenda = dashboard.agenda ?? [];
+const todaysCount = dashboard.kpis.todaysPatientsConfirmed ?? 0;
+const progressSteps = dashboard.treatmentProgress?.steps ?? 0;
+const progressCurrent = Math.min(dashboard.treatmentProgress?.current ?? 0, progressSteps);
+const progressDots = 7;
+const progressFilled =
+  progressSteps > 0 ? Math.min(progressDots, Math.max(0, Math.round((progressCurrent / progressSteps) * progressDots))) : 0;
+
+const occupancyPercentLabel = percentFormatter.format(occupancyValue / 100);
+const newPatientsPercentLabel = percentFormatter.format(newPatientsPct / 100);
+const recentOrders = dashboard.recentOrders ?? [];
+const notificationsList = notifications ?? [];
+const statusStyles: Record<string, string> = {
+  CREATED: 'bg-amber-500/20 text-amber-200',
+  IN_PROGRESS: 'bg-sky-500/20 text-sky-200',
+  DONE: 'bg-emerald-500/20 text-emerald-200',
+  DELIVERED: 'bg-fuchsia-500/20 text-fuchsia-200'
+};
+---
+
+<AppLayout title="Dashboard" description="Visión diaria de la clínica" user={user}>
+  <div class="grid gap-6">
+    <section
+      aria-label="Indicadores clave"
+      class={`grid gap-4 ${userIsAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}
+    >
+      <article class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <header class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Pacientes de hoy</h2>
+          <span class="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">Confirmados</span>
+        </header>
+        <p class="mt-6 text-4xl font-bold text-white">
+          {numberFormatter.format(todaysCount)}
+        </p>
+        {todaysCount === 0 && (
+          <p class="mt-4 text-sm text-slate-400">No hay pacientes confirmados hoy.</p>
+        )}
+      </article>
+      {userIsAdmin && (
+        <article class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+          <header class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Revenue (MTD)</h2>
+            <span class={`text-xs font-semibold ${revenueDeltaColor}`}>{revenueDeltaLabel}</span>
+          </header>
+          <p class="mt-6 text-4xl font-bold text-white">
+            {currencyFormatter.format(dashboard.kpis.revenueMTD ?? 0)}
+          </p>
+          <p class="mt-4 text-sm text-slate-400">Comparado con el mes anterior.</p>
+        </article>
+      )}
+      <article class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <header class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Próximas consultas</h2>
+          <span class="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-300">7 días</span>
+        </header>
+        <p class="mt-6 text-4xl font-bold text-white">
+          {numberFormatter.format(dashboard.kpis.upcomingNewConsults ?? 0)}
+        </p>
+        <p class="mt-4 text-sm text-slate-400">Nuevas consultas agendadas en la semana.</p>
+      </article>
+    </section>
+
+    <section class="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+      <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <header class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Patient Overview</h2>
+            <p class="text-sm text-slate-400">{formatDay(dashboard.period.todayISO)}</p>
+          </div>
+        </header>
+        <div class="mt-6 grid gap-6 md:grid-cols-2">
+          <div class="flex items-center gap-4">
+            <svg viewBox="0 0 80 80" class="h-20 w-20 text-slate-700">
+              <circle cx="40" cy="40" r={circleRadius} stroke="currentColor" stroke-width="10" fill="none" class="opacity-25" />
+              <circle
+                cx="40"
+                cy="40"
+                r={circleRadius}
+                stroke="url(#occupancyGradient)"
+                stroke-width="10"
+                fill="none"
+                stroke-dasharray={`${circumference} ${circumference}`}
+                stroke-dashoffset={occupancyOffset}
+                stroke-linecap="round"
+                transform="rotate(-90 40 40)"
+              />
+              <defs>
+                <linearGradient id="occupancyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#34d399" />
+                  <stop offset="100%" stop-color="#0ea5e9" />
+                </linearGradient>
+              </defs>
+              <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" class="fill-white text-lg font-semibold">
+                {occupancyPercentLabel}
+              </text>
+            </svg>
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-wide text-slate-400">Ocupación hoy</p>
+              <p class="text-lg font-semibold text-white">{occupancyPercentLabel}</p>
+              <p class="text-xs text-slate-400">Turnos confirmados sobre total del día.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <svg viewBox="0 0 80 80" class="h-20 w-20 text-slate-700">
+              <circle cx="40" cy="40" r={circleRadius} stroke="currentColor" stroke-width="10" fill="none" class="opacity-25" />
+              <circle
+                cx="40"
+                cy="40"
+                r={circleRadius}
+                stroke="url(#newPatientsGradient)"
+                stroke-width="10"
+                fill="none"
+                stroke-dasharray={`${circumference} ${circumference}`}
+                stroke-dashoffset={newPatientsOffset}
+                stroke-linecap="round"
+                transform="rotate(-90 40 40)"
+              />
+              <defs>
+                <linearGradient id="newPatientsGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#f59e0b" />
+                  <stop offset="100%" stop-color="#f97316" />
+                </linearGradient>
+              </defs>
+              <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" class="fill-white text-lg font-semibold">
+                {newPatientsPercentLabel}
+              </text>
+            </svg>
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-wide text-slate-400">Nuevos pacientes</p>
+              <p class="text-lg font-semibold text-white">
+                {numberFormatter.format(newPatientsValue)}
+                <span class="ml-1 text-xs text-slate-400">/ {newPatientsGoal}</span>
+              </p>
+              <p class="text-xs text-slate-400">Primer turno agendado este mes.</p>
+            </div>
+          </div>
+        </div>
+        <div class="mt-8">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Próximos pacientes</h3>
+          <ul class="mt-4 space-y-3 text-sm text-slate-200">
+            {dashboard.overview.nextPatients.length === 0 && (
+              <li class="rounded-2xl border border-dashed border-white/10 px-4 py-3 text-slate-400">
+                Aún no hay pacientes próximos en agenda.
+              </li>
+            )}
+            {dashboard.overview.nextPatients.map((patient) => (
+              <li class="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3">
+                <div>
+                  <p class="font-semibold text-white">{patient.name}</p>
+                  <p class="text-xs text-slate-400">{patient.treatment ?? 'Consulta general'}</p>
+                </div>
+                <span class="text-xs text-slate-400">{formatTime(patient.timeISO)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+        <header class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-white">Treatment Progress</h2>
+          <span class="text-xs uppercase tracking-wide text-slate-400">{dashboard.period.month}</span>
+        </header>
+        <div class="mt-6 flex items-center gap-3">
+          {Array.from({ length: progressDots }).map((_, index) => (
+            <span
+              class={`h-3 w-3 rounded-full ${index < progressFilled ? 'bg-emerald-400' : 'bg-white/10'}`}
+              aria-hidden="true"
+            ></span>
+          ))}
+        </div>
+        <p class="mt-4 text-sm text-slate-300">{dashboard.treatmentProgress.label}</p>
+        {progressSteps === 0 && (
+          <p class="mt-2 text-xs text-slate-500">
+            A medida que se completen etapas de tratamiento, verás el avance aquí.
+          </p>
+        )}
+      </section>
+    </section>
+
+    <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+      <header class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Agenda de hoy</h2>
+          <p class="text-sm text-slate-400">Turnos ordenados por horario.</p>
+        </div>
+        <span class="text-xs uppercase tracking-wide text-slate-400">{formatDay(dashboard.period.todayISO)}</span>
+      </header>
+      <div role="list" class="space-y-3">
+        {agenda.length === 0 && (
+          <div class="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-400">
+            No hay turnos agendados para hoy.
+          </div>
+        )}
+        {agenda.map((item) => {
+          const statusDot =
+            item.status === 'COMPLETED'
+              ? 'bg-sky-400'
+              : item.status === 'CANCELLED'
+              ? 'bg-rose-400'
+              : 'bg-emerald-400';
+          return (
+            <div
+              role="listitem"
+              class="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3"
+            >
+              <div>
+                <p class="text-sm font-semibold text-white">
+                  {formatTime(item.time)} – {item.patient}
+                </p>
+                <p class="text-xs text-slate-400">{item.treatment ?? 'Sin tratamiento especificado'}</p>
+              </div>
+              <span class={`h-2.5 w-2.5 rounded-full ${statusDot}`} aria-hidden="true"></span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+
+    <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+      <header class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Notificaciones</h2>
+          <p class="text-sm text-slate-400">Órdenes con entrega prevista para mañana.</p>
+        </div>
+      </header>
+      {notificationsList.length === 0 ? (
+        <div class="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-400">
+          No hay entregas programadas para mañana.
+        </div>
+      ) : (
+        <ul class="space-y-3">
+          {notificationsList.map((notification) => (
+            <li>
+              <a
+                href={`/app/work-orders/${notification.id}`}
+                class="flex flex-col gap-3 rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 hover:bg-white/[0.04] transition-colors md:flex-row md:items-center md:justify-between"
+              >
+                <div>
+                  <p class="text-sm font-semibold text-white">{notification.code}</p>
+                  <p class="text-xs text-slate-400">
+                    {notification.patient} · {notification.client}
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span class="rounded-full bg-white/10 px-2 py-1 text-slate-300">
+                    {formatOrderType(notification.workType)}
+                  </span>
+                  <span
+                    class={`rounded-full px-2 py-1 font-semibold ${statusStyles[notification.status] ?? 'bg-white/10 text-slate-200'}`}
+                  >
+                    {notification.status.replaceAll('_', ' ')}
+                  </span>
+                  <span class="text-slate-400">{formatOrderDate(notification.dueDateISO)}</span>
+                </div>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+
+    <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+      <header class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-white">Órdenes recientes</h2>
+          <p class="text-sm text-slate-400">Últimas órdenes creadas en los últimos 14 días.</p>
+        </div>
+      </header>
+      {recentOrders.length === 0 ? (
+        <div class="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-400">
+          Aún no se han creado órdenes recientemente.
+        </div>
+      ) : (
+        <ul class="space-y-3">
+          {recentOrders.map((order) => (
+            <li>
+              <a
+                href={`/app/work-orders/${order.id}`}
+                class="flex flex-col gap-3 rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 hover:bg-white/[0.04] transition-colors md:flex-row md:items-center md:justify-between"
+              >
+                <div>
+                  <p class="text-sm font-semibold text-white">{order.code}</p>
+                  <p class="text-xs text-slate-400">
+                    {order.patient} · {order.client}
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span class="rounded-full bg-white/10 px-2 py-1 text-slate-300">
+                    {formatOrderType(order.workType)}
+                  </span>
+                  <span
+                    class={`rounded-full px-2 py-1 font-semibold ${statusStyles[order.status] ?? 'bg-white/10 text-slate-200'}`}
+                  >
+                    {order.status.replaceAll('_', ' ')}
+                  </span>
+                  <span class="text-slate-400">{formatOrderDate(order.createdAt)}</span>
+                </div>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  </div>
+</AppLayout>

@@ -1,0 +1,66 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import CreateClinicForm from '@/components/settings/CreateClinicForm.astro';
+import CreateClientForm from '@/components/settings/CreateClientForm.astro';
+import CreateDentistForm from '@/components/settings/CreateDentistForm.astro';
+import CreateLabForm from '@/components/settings/CreateLabForm.astro';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<AppLayout title="Entidades" description="Administrá las entidades de la plataforma" user={user}>
+  <div class="w-full">
+    <div class="flex space-x-4 border-b">
+      <button id="clinics-button" class="px-4 py-2 font-semibold border-b-2 border-transparent">Clínicas</button>
+      <button id="clients-button" class="px-4 py-2 font-semibold border-b-2 border-transparent">Clientes</button>
+      <button id="dentists-button" class="px-4 py-2 font-semibold border-b-2 border-transparent">Odontólogos</button>
+      <button id="labs-button" class="px-4 py-2 font-semibold border-b-2 border-transparent">Laboratorios</button>
+    </div>
+    <div id="clinics-form" class="mt-4">
+      <CreateClinicForm />
+    </div>
+    <div id="clients-form" class="mt-4 hidden">
+      <CreateClientForm />
+    </div>
+    <div id="dentists-form" class="mt-4 hidden">
+      <CreateDentistForm />
+    </div>
+    <div id="labs-form" class="mt-4 hidden">
+      <CreateLabForm />
+    </div>
+  </div>
+
+  <script>
+    const buttons = {
+      clinics: document.getElementById('clinics-button'),
+      clients: document.getElementById('clients-button'),
+      dentists: document.getElementById('dentists-button'),
+      labs: document.getElementById('labs-button'),
+    };
+
+    const forms = {
+      clinics: document.getElementById('clinics-form'),
+      clients: document.getElementById('clients-form'),
+      dentists: document.getElementById('dentists-form'),
+      labs: document.getElementById('labs-form'),
+    };
+
+    function showForm(formName) {
+      Object.values(forms).forEach(form => form.classList.add('hidden'));
+      forms[formName].classList.remove('hidden');
+
+      Object.values(buttons).forEach(button => button.classList.remove('border-indigo-500'));
+      buttons[formName].classList.add('border-indigo-500');
+    }
+
+    buttons.clinics.addEventListener('click', () => showForm('clinics'));
+    buttons.clients.addEventListener('click', () => showForm('clients'));
+    buttons.dentists.addEventListener('click', () => showForm('dentists'));
+    buttons.labs.addEventListener('click', () => showForm('labs'));
+
+    showForm('clinics');
+  </script>
+</AppLayout>

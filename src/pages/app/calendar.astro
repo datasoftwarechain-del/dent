@@ -1,0 +1,352 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import { Role } from '@/server/db/types';
+import { fetchCalendarEvents } from '@/server/services/calendar-service';
+
+type ViewMode = 'week' | 'month';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const today = new Date();
+
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+const addDays = (date: Date, days: number) => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+const addMonths = (date: Date, months: number) => {
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + months);
+  return result;
+};
+const startOfWeek = (date: Date) => {
+  const start = startOfDay(date);
+  const day = start.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  return addDays(start, diffToMonday);
+};
+const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+const formatDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const formatISODate = (date: Date) => `${formatDateKey(date)}`;
+const formatHumanDate = (date: Date) =>
+  date.toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
+const formatWeekLabel = (start: Date, end: Date) =>
+  `${start.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })} – ${addDays(end, -1).toLocaleDateString('es-AR', {
+    day: 'numeric',
+    month: 'short'
+  })}`;
+const formatMonthLabel = (date: Date) =>
+  date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+
+const viewParam = (Astro.url.searchParams.get('view') ?? 'week') as ViewMode;
+const view: ViewMode = viewParam === 'month' ? 'month' : 'week';
+
+const fromParam = Astro.url.searchParams.get('from');
+let referenceDate = today;
+if (fromParam) {
+  const parts = fromParam.split('-').map(Number);
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    const d = new Date(year, month - 1, day);
+    if (!Number.isNaN(d.getTime())) {
+      referenceDate = d;
+    }
+  }
+}
+
+const weekStart = startOfWeek(referenceDate);
+const weekEnd = addDays(weekStart, 7);
+
+const monthAnchor = startOfMonth(referenceDate);
+const monthEnd = addMonths(monthAnchor, 1);
+const monthGridStart = startOfWeek(monthAnchor);
+const monthGridEnd = addDays(monthGridStart, 42); // 6 semanas (7 x 6)
+
+const rangeStart = view === 'week' ? weekStart : monthGridStart;
+const rangeEnd = view === 'week' ? weekEnd : monthGridEnd;
+
+let events: Array<any> = [];
+try {
+  const calendarURL = new URL('/api/calendar', Astro.request.url);
+  calendarURL.searchParams.set('range', view);
+  calendarURL.searchParams.set('from', formatISODate(referenceDate));
+
+  const headers = new Headers();
+  const cookie = Astro.request.headers.get('cookie');
+  if (cookie) {
+    headers.set('cookie', cookie);
+  }
+
+  const apiResponse = await fetch(calendarURL, { headers });
+  if (apiResponse.ok) {
+    const apiData = await apiResponse.json();
+    events = (apiData?.data?.events ?? []).map((e: any) => ({
+      ...e,
+      start: new Date(e.start),
+      end: e.end ? new Date(e.end) : null
+    }));
+  } else {
+    console.warn('Calendario: respuesta no válida', apiResponse.status);
+  }
+} catch (error) {
+  console.error('Calendario: no se pudo obtener eventos', error);
+}
+
+const hours = Array.from({ length: 13 }, (_, index) => 8 + index); // 08 a 20 hs
+const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+
+const dayEventsMap = new Map<string, typeof events>();
+for (const event of events) {
+  const key = formatDateKey(event.start);
+  const bucket = dayEventsMap.get(key) ?? [];
+  bucket.push(event);
+  dayEventsMap.set(key, bucket);
+}
+
+const weeklyAppointments = new Map<string, typeof events>();
+const weeklyOrders = new Map<string, typeof events>();
+
+if (view === 'week') {
+  for (const day of weekDays) {
+    const key = formatDateKey(day);
+    const eventsForDay = dayEventsMap.get(key) ?? [];
+    for (const event of eventsForDay) {
+      const hour = event.start.getHours();
+      const slotKey = `${key}|${hour}`;
+      if (event.type === 'WORK_ORDER') {
+        const bucket = weeklyOrders.get(slotKey) ?? [];
+        bucket.push(event);
+        weeklyOrders.set(slotKey, bucket);
+      } else {
+        const bucket = weeklyAppointments.get(slotKey) ?? [];
+        bucket.push(event);
+        weeklyAppointments.set(slotKey, bucket);
+      }
+    }
+  }
+}
+
+const monthCells = view === 'month'
+  ? Array.from({ length: 42 }, (_, index) => {
+      const date = addDays(monthGridStart, index);
+      const key = formatDateKey(date);
+      const items = (dayEventsMap.get(key) ?? []).sort((a, b) => a.start.getTime() - b.start.getTime());
+      return {
+        date,
+        key,
+        inCurrentMonth: date >= monthAnchor && date < monthEnd,
+        items
+      };
+    })
+  : [];
+
+const monthWeeks = view === 'month'
+  ? Array.from({ length: 6 }, (_, index) => monthCells.slice(index * 7, index * 7 + 7))
+  : [];
+
+const buildViewHref = (targetView: ViewMode, targetDate: Date) => {
+  const url = new URL(Astro.url.toString());
+  url.searchParams.set('view', targetView);
+  url.searchParams.set('from', formatISODate(targetDate));
+  return `${url.pathname}?${url.searchParams.toString()}`;
+};
+
+const prevHref =
+  view === 'week'
+    ? buildViewHref('week', addDays(weekStart, -7))
+    : buildViewHref('month', addMonths(monthAnchor, -1));
+const nextHref =
+  view === 'week'
+    ? buildViewHref('week', addDays(weekStart, 7))
+    : buildViewHref('month', addMonths(monthAnchor, 1));
+const todayHref = buildViewHref(view, today);
+
+const weekHref = buildViewHref('week', weekStart);
+const monthHref = buildViewHref('month', monthAnchor);
+
+const eventTypeStyles: Record<'APPOINTMENT' | 'WORK_ORDER', string> = {
+  APPOINTMENT: 'bg-emerald-500/20 text-emerald-200',
+  WORK_ORDER: 'bg-sky-500/20 text-sky-200'
+};
+
+const statusStyles: Record<string, string> = {
+  SCHEDULED: 'bg-emerald-500/10 text-emerald-200',
+  COMPLETED: 'bg-sky-500/10 text-sky-200',
+  CANCELLED: 'bg-rose-500/10 text-rose-200',
+  NO_SHOW: 'bg-amber-500/10 text-amber-200',
+  CREATED: 'bg-amber-500/10 text-amber-200',
+  IN_PROGRESS: 'bg-sky-500/10 text-sky-200',
+  DONE: 'bg-emerald-500/10 text-emerald-200',
+  DELIVERED: 'bg-fuchsia-500/10 text-fuchsia-200'
+};
+---
+
+<AppLayout title="Agenda" description="Visualiza citas y entregas" user={user}>
+  <section class="rounded-3xl border border-white/10 bg-slate-950/70 p-6 shadow-lg shadow-primary/5">
+    <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h1 class="text-xl font-semibold text-white">
+          {view === 'week' ? `Semana ${formatWeekLabel(weekStart, weekEnd)}` : formatMonthLabel(monthAnchor)}
+        </h1>
+        <p class="text-sm text-slate-400">
+          Visualiza citas confirmadas y entregas de órdenes en un vistazo.
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <a
+          href={weekHref}
+          class={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+            view === 'week' ? 'bg-accent/20 text-accent' : 'border border-white/10 text-slate-300 hover:border-accent hover:text-accent'
+          }`}
+        >
+          Vista semanal
+        </a>
+        <a
+          href={monthHref}
+          class={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+            view === 'month' ? 'bg-accent/20 text-accent' : 'border border-white/10 text-slate-300 hover:border-accent hover:text-accent'
+          }`}
+        >
+          Vista mensual
+        </a>
+        <div class="ml-2 flex items-center gap-2 text-xs text-slate-300">
+          <a href={prevHref} class="rounded-full border border-white/10 px-3 py-1 hover:border-accent hover:text-accent">
+            Anterior
+          </a>
+          <a href={todayHref} class="rounded-full border border-white/10 px-3 py-1 hover:border-accent hover:text-accent">
+            Hoy
+          </a>
+          <a href={nextHref} class="rounded-full border border-white/10 px-3 py-1 hover:border-accent hover:text-accent">
+            Siguiente
+          </a>
+        </div>
+      </div>
+    </header>
+
+    {view === 'week' ? (
+      <div class="mt-6 overflow-x-auto">
+        <table class="min-w-full border-collapse">
+          <thead>
+            <tr>
+              <th class="w-24 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Hora
+              </th>
+              {weekDays.map((day) => (
+                <th class="min-w-[140px] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <div class="flex flex-col gap-1">
+                    <span>{day.toLocaleDateString('es-AR', { weekday: 'short' })}</span>
+                    <span class="text-slate-500">{day.getDate()}</span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {hours.map((hour) => (
+              <tr class="border-t border-white/5">
+                <td class="px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  {`${String(hour).padStart(2, '0')}:00`}
+                </td>
+                {weekDays.map((day) => {
+                  const dayKey = formatDateKey(day);
+                  const slotKey = `${dayKey}|${hour}`;
+                  const appointments = weeklyAppointments.get(slotKey) ?? [];
+                  const orders = weeklyOrders.get(slotKey) ?? [];
+                  return (
+                    <td class="align-top px-3 py-3 text-xs">
+                      <div class="space-y-2">
+                        {orders.map((order) => (
+                          <a href={`/app/work-orders/${order.id}`} class="block rounded-lg border border-dashed border-white/10 bg-sky-500/10 px-2 py-1.5 text-sky-200 hover:bg-sky-500/20 transition-colors">
+                            <p class="text-[10px] font-semibold uppercase tracking-wide">Orden</p>
+                            <p class="text-xs text-white">{order.title}</p>
+                            <p class="text-[10px] text-slate-400 truncate">{order.patientName ?? 'Paciente'}</p>
+                          </a>
+                        ))}
+                        {appointments.map((appointment) => (
+                          <div class="rounded-lg border border-white/10 bg-emerald-500/10 px-2 py-1.5 text-emerald-200">
+                            <p class="text-[10px] font-semibold uppercase tracking-wide">Cita</p>
+                            <p class="text-xs text-white">{appointment.title}</p>
+                            <p class="text-[10px] text-slate-400 truncate">{appointment.patientName ?? 'Paciente'}</p>
+                            <span
+                              class={`mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                                statusStyles[appointment.status ?? ''] ?? 'bg-white/10 text-slate-200'
+                              }`}
+                            >
+                              {appointment.status ?? 'S/D'}
+                            </span>
+                          </div>
+                        ))}
+                        {orders.length === 0 && appointments.length === 0 && (
+                          <span class="text-[10px] text-slate-500/50">—</span>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div class="mt-6 grid grid-cols-1 gap-4">
+        <div class="grid grid-cols-7 gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((label) => (
+            <span class="text-center">{label}</span>
+          ))}
+        </div>
+        <div class="grid grid-cols-7 gap-2">
+          {monthWeeks.map((week) =>
+            week.map((day) => {
+              const items = day.items;
+              const visibleItems = items.slice(0, 3);
+              const remaining = Math.max(0, items.length - visibleItems.length);
+              return (
+                <div
+                  class={`flex min-h-[110px] flex-col gap-2 rounded-2xl border px-3 py-3 ${
+                    day.inCurrentMonth ? 'border-white/10 bg-white/[0.03]' : 'border-white/5 bg-white/[0.01] text-slate-500'
+                  }`}
+                >
+                  <div class="flex items-center justify-between text-xs">
+                    <span class={`font-semibold ${day.date.toDateString() === today.toDateString() ? 'text-accent' : 'text-slate-300'}`}>
+                      {day.date.getDate()}
+                    </span>
+                    {day.inCurrentMonth && remaining > 0 && (
+                      <span class="text-[10px] text-slate-400">+{remaining}</span>
+                    )}
+                  </div>
+                  <div class="space-y-2 text-[11px]">
+                    {visibleItems.length === 0 && day.inCurrentMonth && (
+                      <p class="text-slate-500">Sin actividades.</p>
+                    )}
+                    {visibleItems.map((item) => (
+                      <a
+                        href={item.type === 'WORK_ORDER' ? `/app/work-orders/${item.id}` : '#'}
+                        class="block rounded-lg border border-white/10 bg-white/5 px-1.5 py-1 hover:bg-white/10 transition-colors"
+                      >
+                        <p class={`mb-0.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${eventTypeStyles[item.type]}`}>
+                          {item.type === 'APPOINTMENT' ? 'Cita' : 'Orden'}
+                        </p>
+                        <p class="text-[10px] font-semibold text-white truncate">{item.title}</p>
+                        <p class="text-[9px] text-slate-400 truncate">
+                          {item.type === 'APPOINTMENT'
+                            ? item.patientName ?? 'Paciente'
+                            : item.patientName ?? 'Paciente'}
+                        </p>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    )}
+  </section>
+</AppLayout>

@@ -1,0 +1,79 @@
+{
+  "trabajos": [
+    {
+      "categoria": "Zirconia / Cad-Cam",
+      "nombre": "Corona / Incrustación / Pieza intermedia / Carilla",
+      "precio": 5800
+    },
+    {
+      "categoria": "Zirconia / Cad-Cam",
+      "nombre": "Corona a perno",
+      "precio": 6500
+    },
+    {
+      "categoria": "Zirconia / Cad-Cam",
+      "nombre": "Disilicato de litio o Feldespato",
+      "precio": 6050
+    },
+    {
+      "categoria": "Zirconia / Cad-Cam",
+      "nombre": "Diseño de Sonrisas SMILE",
+      "precio": "Consultar"
+    },
+    {
+      "categoria": "Ceramometálicas",
+      "nombre": "Jacket Ceramometálica y/o pieza intermedia (c/u)",
+      "precio": 4850
+    },
+    {
+      "categoria": "Ceramometálicas",
+      "nombre": "Ceramometálica a perno",
+      "precio": 5200
+    },
+    {
+      "categoria": "Ceramage",
+      "nombre": "Incrustación o corona total",
+      "precio": 3950
+    },
+    {
+      "categoria": "Metales",
+      "nombre": "Perno muñón",
+      "precio": 1750
+    },
+    {
+      "categoria": "Metales",
+      "nombre": "Incrustación o corona (Cr. Ni. / incluye costo metal)",
+      "precio": 3000
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "Esqueleto de cromo (+ envíos)",
+      "precio": 4200
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "Terminación de 1 a 5",
+      "precio": 3250
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "Terminación de 6 a 10",
+      "precio": 3650
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "Cubetas individuales",
+      "precio": 850
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "Completa",
+      "precio": 4400
+    },
+    {
+      "categoria": "Prótesis",
+      "nombre": "PPR a placa",
+      "precio": 3500
+    }
+  ]
+}
